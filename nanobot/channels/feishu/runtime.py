@@ -2102,7 +2102,23 @@ class FeishuChannel(BaseChannel):
         # Only process supported document types
         SUPPORTED_EXTS = {".pdf", ".docx", ".txt", ".md", ".xlsx"}
         if ext not in SUPPORTED_EXTS:
-            return None
+            # Log unsupported format
+            self.logger.info("Unsupported file format: {} ({})", path.name, ext)
+
+            # Return user-friendly error message
+            format_display = {
+                ".pptx": "PowerPoint (PPTX)",
+                ".ppt": "PowerPoint (PPT)",
+                ".doc": "旧版Word (DOC)",
+                ".jpg": "图片", ".jpeg": "图片", ".png": "图片",
+                ".gif": "图片", ".bmp": "图片", ".webp": "图片",
+            }.get(ext, f"{ext}格式")
+
+            return (
+                f"⚠️ 暂时无法处理这个文件：{path.name}\n\n"
+                f"目前支持 PDF、DOCX、TXT、Markdown、XLSX 格式。\n\n"
+                f"PPTX、DOC 和图片内容识别暂不支持。"
+            )
 
         try:
             # Import KB upload tool
