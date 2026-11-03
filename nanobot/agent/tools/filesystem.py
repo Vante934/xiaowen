@@ -312,6 +312,11 @@ class ReadFileTool(_FsTool):
             if not fp.is_file():
                 return ToolResult.error(f"Error: Not a file: {path}")
 
+            # B2-D: Validate Feishu media file access
+            validation_result = await self._validate_feishu_media_file_access(fp)
+            if validation_result is not None:
+                return validation_result
+
             file_size = fp.stat().st_size
             if file_size > self._MAX_FILE_SIZE_BYTES:
                 size_mib = file_size / (1024 * 1024)
@@ -539,6 +544,118 @@ class ReadFileTool(_FsTool):
             close = getattr(source_iterator, "close", None)
             if close is not None:
                 close()
+
+    def _is_feishu_media_file(self, fp: Path) -> bool:
+        """Check if file is in Feishu media directory.
+
+        Args:
+            fp: Resolved file path
+
+        Returns:
+            True if file is in Feishu media directory
+        """
+        try:
+            from nanobot.config.paths import get_media_dir
+            media_dir = get_media_dir("feishu").resolve()
+            return fp.resolve().is_relative_to(media_dir)
+        except (ValueError, OSError, RuntimeError):
+            return False
+
+    async def _validate_feishu_media_file_access(self, fp: Path) -> ToolResult | None:
+        """Validate Feishu media file access based on pending_file.
+
+        Args:
+            fp: Resolved file path
+
+        Returns:
+            ToolResult with error if access denied, None if allowed
+        """
+        # Only check Feishu media files
+        if not self._is_feishu_media_file(fp):
+            return None
+
+        # Get RequestContext
+        from nanobot.agent.tools.context import current_request_context
+        request = current_request_context()
+
+        # If no RequestContext, deny access to Feishu media files
+        # (Cannot verify identity for multi-user scenarios)
+        if request is None:
+            return ToolResult.error(
+                "Error: Permission denied - cannot verify file ownership"
+            )
+
+        # If explicitly not Feishu channel, allow
+        # (CLI, other channels have their own access control)
+        if request.channel and request.channel != "feishu":
+            return None
+
+        # If no channel set but we have context, treat as potentially Feishu
+        # Require full verification for Feishu media files
+        if not request.sender_id:
+            return ToolResult.error("Error: Permission denied - sender identity required")
+
+        if not request.session_key:
+            return ToolResult.error("Error: Permission denied - session required")
+
+        # Get session and pending_file
+        try:
+            from nanobot.config.loader import load_config
+            from nanobot.session.manager import SessionManager
+            from nanobot.kb.store import KnowledgeBaseStore
+
+            config = load_config()
+            sessions = SessionManager(config.workspace_path)
+
+            # Get session
+            session = await sessions.state.get(request.session_key)
+            if not session or not session.metadata:
+                return ToolResult.error(
+                    "Error: No file available in current session. Upload a file first."
+                )
+
+            # Get pending_file
+            pending_file = session.metadata.get("pending_file")
+            if not pending_file:
+                return ToolResult.error(
+                    "Error: No file available. Upload a file first."
+                )
+
+            # Verify pending_file.sender_id matches request.sender_id
+            pending_sender = pending_file.get("sender_id")
+            if not pending_sender or pending_sender != request.sender_id:
+                return ToolResult.error("Error: Permission denied")
+
+            # Get file record from KB
+            kb_store = KnowledgeBaseStore(sessions.get_sqlite_store())
+            file_id = pending_file.get("file_id")
+            if not file_id:
+                return ToolResult.error("Error: Invalid file reference")
+
+            file_record = kb_store.get_file(file_id)
+            if not file_record:
+                return ToolResult.error("Error: File record not found")
+
+            # Verify file path matches
+            recorded_path = file_record.get("file_path")
+            if not recorded_path:
+                return ToolResult.error("Error: File path not recorded")
+
+            try:
+                recorded_path_resolved = Path(recorded_path).resolve()
+                fp_resolved = fp.resolve()
+
+                if recorded_path_resolved != fp_resolved:
+                    return ToolResult.error("Error: Permission denied - path mismatch")
+            except (OSError, RuntimeError):
+                return ToolResult.error("Error: Cannot verify file path")
+
+            # All checks passed
+            return None
+
+        except Exception as e:
+            # Log but don't expose internals
+            return ToolResult.error(f"Error: Permission verification failed")
 
 
 # ---------------------------------------------------------------------------
