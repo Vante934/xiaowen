@@ -1908,13 +1908,13 @@ class FeishuChannel(BaseChannel):
 
     def _extract_file_id(self, result_str: str) -> str | None:
         """Extract file_id from KBUploadTool result string.
-        
+
         Args:
             result_str: Result string from KBUploadTool.execute()
-            
+
         Returns:
             file_id if found, None otherwise
-            
+
         Handles formats:
         - "ID: {file_id}"
         - "(ID: {file_id}, ...)"
@@ -1931,14 +1931,16 @@ class FeishuChannel(BaseChannel):
         sender_id: str,
         file_id: str,
         chat_type: str,
+        message_id: str | None = None,  # B2-C: For concurrency protection
     ) -> bool:
         """Save pending file info to session metadata.
-        
+
         Args:
             sender_id: Feishu sender ID (ou_xxx)
             file_id: File ID from KB
             chat_type: Chat type (p2p or group)
-            
+            message_id: Message ID for concurrency protection (B2-C)
+
         Returns:
             True if successfully saved, False otherwise
         """
@@ -1946,24 +1948,24 @@ class FeishuChannel(BaseChannel):
         if chat_type != "p2p":
             self.logger.debug("Skip pending_file for non-p2p chat: {}", chat_type)
             return False
-        
+
         try:
             # Get file metadata from KB
             if not self._kb_store:
                 self.logger.warning("KB store not available for pending_file")
                 return False
-            
+
             file_record = self._kb_store.get_file(file_id)
             if not file_record:
                 self.logger.warning("File record not found for file_id: {}", file_id)
                 return False
-            
+
             # Check file status
             file_status = file_record.get("status", "unknown")
             if file_status == "failed":
                 self.logger.info("Skip pending_file for failed file: {}", file_id)
                 return False
-            
+
             # Generate summary (first 200 chars of parsed text)
             summary = None
             try:
@@ -1974,7 +1976,7 @@ class FeishuChannel(BaseChannel):
                         summary += "..."
             except Exception as e:
                 self.logger.debug("Failed to generate summary (non-blocking): {}", e)
-            
+
             # Build pending_file structure
             pending_file = {
                 "file_id": file_id,
@@ -1986,41 +1988,126 @@ class FeishuChannel(BaseChannel):
                 "summary": summary,
                 "status": "pending",
                 "request_id": str(uuid.uuid4()),
+                "message_id": message_id,  # B2-C: Store message_id for tracking
             }
-            
+
             # Construct session_key (private chat)
             session_key = f"{self.name}:{sender_id}"
-            
+
             # Get SessionManager
             from nanobot.config.loader import load_config
             from nanobot.session.manager import SessionManager
-            
+
             config = load_config()
             sessions = SessionManager(config.workspace_path)
-            
-            # Atomic update
+
+            # Atomic update with concurrency protection
+            save_succeeded = False
+
             def save_to_meta(meta: dict[str, Any]) -> None:
+                nonlocal save_succeeded
+
+                # B2-C: Require valid message_id for concurrency protection
+                if not message_id:
+                    # No message_id: cannot guarantee concurrency safety, reject
+                    self.logger.warning(
+                        "Skip saving pending_file: message_id required for concurrency protection"
+                    )
+                    save_succeeded = False
+                    return None
+
+                # B2-C: Check if a newer file request has arrived
+                current_file_message_id = meta.get("current_file_message_id")
+                if current_file_message_id and current_file_message_id != message_id:
+                    # A newer file request has arrived, don't overwrite
+                    self.logger.info(
+                        "Skip saving pending_file: newer file request detected (current={}, this={})",
+                        current_file_message_id,
+                        message_id,
+                    )
+                    save_succeeded = False
+                    return None
+
+                # Save pending_file
                 meta["pending_file"] = pending_file
+                save_succeeded = True
                 return None
-            
+
             await sessions.state.mutate_metadata(
                 session_key,
                 save_to_meta,
                 create_if_missing=True,
             )
-            
-            self.logger.info(
-                "Saved pending_file: file_id={}, filename={}, session={}",
-                file_id,
-                file_record["filename"],
-                session_key,
-            )
-            
-            return True  # Successfully saved
-            
+
+            if save_succeeded:
+                self.logger.info(
+                    "Saved pending_file: file_id={}, filename={}, session={}",
+                    file_id,
+                    file_record["filename"],
+                    session_key,
+                )
+
+            return save_succeeded  # Return actual save result
+
         except Exception as e:
             self.logger.exception("Failed to save pending_file (non-blocking): {}", e)
             return False  # Failed to save
+
+    async def _clear_pending_file_for_new_upload(
+        self,
+        sender_id: str,
+        new_message_id: str,
+    ) -> bool:
+        """Clear old pending_file when new file arrives (B2-C).
+
+        Args:
+            sender_id: Feishu sender ID
+            new_message_id: New file's message ID
+
+        Returns:
+            True if successfully cleared, False otherwise
+        """
+        # B2-C: Require valid message_id for concurrency protection
+        if not new_message_id:
+            self.logger.warning(
+                "Skip clearing pending_file: message_id required for concurrency protection"
+            )
+            return False
+
+        try:
+            session_key = f"{self.name}:{sender_id}"
+
+            from nanobot.config.loader import load_config
+            from nanobot.session.manager import SessionManager
+
+            config = load_config()
+            sessions = SessionManager(config.workspace_path)
+
+            def clear_meta(meta: dict[str, Any]) -> None:
+                # 1. Delete old pending_file
+                if "pending_file" in meta:
+                    old_file = meta.get("pending_file", {})
+                    self.logger.info(
+                        "Clearing old pending_file: {} (new file arriving)",
+                        old_file.get("filename", "unknown"),
+                    )
+                    del meta["pending_file"]
+
+                # 2. Record current file request identifier
+                meta["current_file_message_id"] = new_message_id
+                return None
+
+            await sessions.state.mutate_metadata(
+                session_key,
+                clear_meta,
+                create_if_missing=True,
+            )
+
+            return True
+
+        except Exception as e:
+            self.logger.exception("Failed to clear pending_file (non-blocking): {}", e)
+            return False
 
     async def _send_file_greeting(
         self,
@@ -2028,7 +2115,7 @@ class FeishuChannel(BaseChannel):
         file_id: str,
     ) -> None:
         """Send file greeting message after upload.
-        
+
         Args:
             sender_id: Feishu sender ID (ou_xxx)
             file_id: File ID from KB
@@ -2038,23 +2125,23 @@ class FeishuChannel(BaseChannel):
             if not self._kb_store:
                 self.logger.warning("KB store not available for file greeting")
                 return
-            
+
             file_record = self._kb_store.get_file(file_id)
             if not file_record:
                 self.logger.warning("File record not found for greeting: {}", file_id)
                 return
-            
+
             # Extract file info
             filename = file_record.get("filename", "文件")
             file_size = file_record.get("file_size", 0)
-            
+
             # Format file size
             size_kb = file_size / 1024
             if size_kb < 1024:
                 size_str = f"{size_kb:.1f} KB"
             else:
                 size_str = f"{size_kb / 1024:.1f} MB"
-            
+
             # Build greeting message
             message = f"""📄 收到文件：{filename} ({size_str})
 
@@ -2065,7 +2152,7 @@ class FeishuChannel(BaseChannel):
 • 分析文档内容
 
 请告诉我你想做什么，或者直接提问。"""
-            
+
             # Send message
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(
@@ -2076,9 +2163,9 @@ class FeishuChannel(BaseChannel):
                 "text",
                 message,
             )
-            
+
             self.logger.info("Sent file greeting for: {}", filename)
-            
+
         except Exception as e:
             self.logger.exception("Failed to send file greeting: {}", e)
             raise  # Re-raise to trigger fallback
@@ -2118,6 +2205,51 @@ class FeishuChannel(BaseChannel):
                 f"⚠️ 暂时无法处理这个文件：{path.name}\n\n"
                 f"目前支持 PDF、DOCX、TXT、Markdown、XLSX 格式。\n\n"
                 f"PPTX、DOC 和图片内容识别暂不支持。"
+            )
+
+        # B2-E: Check file size limit (50 MiB)
+        MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MiB
+        try:
+            file_size = path.stat().st_size
+        except Exception as e:
+            # File stat failed - reject upload
+            self.logger.error("Failed to get file size for {}: {}", path.name, e)
+
+            # Try to clean up the file
+            try:
+                if path.exists():
+                    path.unlink()
+                    self.logger.info("Deleted file after stat failure: {}", path.name)
+            except Exception as cleanup_error:
+                self.logger.warning("Failed to delete file after stat failure: {}", cleanup_error)
+
+            return (
+                f"⚠️ 无法读取文件信息：{path.name}\n\n"
+                f"文件可能已损坏或无法访问。请重新上传。"
+            )
+
+        if file_size > MAX_FILE_SIZE_BYTES:
+            # File too large - reject upload
+            size_mib = file_size / (1024 * 1024)
+            self.logger.info(
+                "File size limit exceeded: {} ({:.2f} MiB > 50 MiB)",
+                path.name,
+                size_mib
+            )
+
+            # Delete the oversized file
+            try:
+                if path.exists():
+                    path.unlink()
+                    self.logger.info("Deleted oversized file: {} ({} bytes)", path.name, file_size)
+            except Exception as cleanup_error:
+                self.logger.warning("Failed to delete oversized file: {}", cleanup_error)
+
+            # Return user-friendly error message
+            return (
+                f"⚠️ 文件过大：{path.name} ({size_mib:.1f} MiB)\n\n"
+                f"文件大小限制：50 MiB\n\n"
+                f"请压缩文件后重新上传，或将文件分割成多个小文件。"
             )
 
         try:
@@ -2168,7 +2300,7 @@ class FeishuChannel(BaseChannel):
                     index_manager=self._index_manager,  # Inject shared IndexManager
                     progress_callback=progress_callback if sender_id else None,
                 )
-                
+
                 # Cache tool only if no progress callback (shared instance)
                 if not sender_id:
                     self._kb_tool = kb_tool
@@ -2185,17 +2317,17 @@ class FeishuChannel(BaseChannel):
             else:
                 self.logger.info("File uploaded to KB: {}", path.name)
                 result_str = str(result)
-                
+
                 # Extract file_id for B2 pending_file management
                 file_id = self._extract_file_id(result_str)
-                
+
                 if file_id and sender_id:
                     # Note: chat_type will be passed in next step
                     # For now, we need to modify the call site to pass it
                     self.logger.debug("Extracted file_id: {}", file_id)
                 elif not file_id:
                     self.logger.warning("Failed to extract file_id from KB result: {}", result_str[:200])
-                
+
                 # Return status message (will be appended to content_text)
                 if "ID:" in result_str:
                     return "✅ File added to knowledge base successfully"
@@ -3191,6 +3323,13 @@ PDF、DOCX、TXT、Markdown、XLSX
                     content_parts.append(content_text)
 
             elif msg_type in ("image", "audio", "file", "media"):
+                # B2-C: Clear old pending_file BEFORE downloading (p2p file only)
+                if msg_type == "file" and chat_type == "p2p":
+                    await self._clear_pending_file_for_new_upload(
+                        sender_id=sender_id,
+                        new_message_id=message_id,
+                    )
+
                 file_path, content_text = await self._download_and_save_media(
                     msg_type, content_json, message_id
                 )
@@ -3200,20 +3339,21 @@ PDF、DOCX、TXT、Markdown、XLSX
                     # Auto-upload document files to knowledge base
                     if msg_type == "file":
                         kb_result = await self._auto_upload_to_kb(file_path, sender_id)
-                        
+
                         # B2-A: Extract file_id and save pending_file
                         if kb_result:
                             result_str = str(kb_result)
                             file_id = self._extract_file_id(result_str)
-                            
+
                             if file_id:
                                 # Save pending_file to session metadata
                                 saved = await self._save_pending_file_to_session(
                                     sender_id=sender_id,
                                     file_id=file_id,
                                     chat_type=chat_type,
+                                    message_id=message_id,  # B2-C: For concurrency protection
                                 )
-                                
+
                                 # B2-D: Send greeting and block only if saved successfully
                                 if chat_type == "p2p" and saved:
                                     try:
@@ -3224,7 +3364,7 @@ PDF、DOCX、TXT、Markdown、XLSX
                                     except Exception as e:
                                         # Greeting failed, fallback to normal flow
                                         self.logger.warning("File greeting failed, using fallback: {}", e)
-                            
+
                             # Group chat, save failed, or greeting failed: append KB result to content
                             content_text = f"{content_text}\n{kb_result}"
 
