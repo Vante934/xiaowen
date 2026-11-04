@@ -14,7 +14,7 @@
 **发现**: 当前目录不是 Git 仓库
 
 ```
-路径: F:\nanobot-main\nanobot-main
+路径: 项目根目录
 Git 状态: 未初始化（无 .git 目录）
 ```
 
@@ -45,7 +45,7 @@ Git 状态: 未初始化（无 .git 目录）
 ### 1.3 项目结构
 
 ```
-F:\nanobot-main\nanobot-main\
+项目根目录/
 ├── nanobot/               # 核心代码
 │   ├── agent/             # Agent 逻辑
 │   ├── bus/               # MessageBus
