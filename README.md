@@ -1,6 +1,6 @@
-<img src="images/飞书小文.png" align="left" width="95" alt="Xiaowen Logo" />
+<img src="images/飞书小文.png" align="left" width="115" alt="Xiaowen Logo" />
 
-# 小文 (Xiaowen)
+<font size="6"><b>小文 (Xiaowen)</b></font>
 
 **具备工具调用、任务执行与个人知识库能力的智能 Agent**  
 *Your smart AI agent with Knowledge Base & Tool execution — right in Feishu.*
@@ -14,10 +14,11 @@
 [简体中文](#小文-xiaowen) | [English](#english)
 
 <br clear="left" />
+<br />
 
----
-
-**小文** 帮助你在飞书中完成日常对话、文档处理和知识检索：理解用户意图，调用工具执行任务，并基于上传文档进行内容总结与问答。
+<p align="center">
+  <b>小文</b> 帮助你在飞书中完成日常对话、文档处理和知识检索：理解用户意图，调用工具执行任务，并基于上传文档进行内容总结与问答。
+</p>
 
 ---
 
