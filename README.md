@@ -1,33 +1,19 @@
-<p align="center">
-  <img src="images/飞书小文.png" alt="Xiaowen Logo" width="180"/>
-</p>
+<img src="images/飞书小文.png" align="left" width="115" alt="Xiaowen Logo" />
 
-<h1 align="center">小文 (Xiaowen)</h1>
+# 小文 (Xiaowen)
 
-<p align="center">
-  <b>具备工具调用、任务执行与个人知识库能力的智能 Agent</b><br>
-  <i>Your smart AI agent with Knowledge Base & Tool execution — right in Feishu.</i>
-</p>
+**具备工具调用、任务执行与个人知识库能力的智能 Agent**  
+*Your smart AI agent with Knowledge Base & Tool execution — right in Feishu.*
 
-<p align="center">
-  <a href="#小文-xiaowen">简体中文</a> | <a href="#english">English</a>
-</p>
+[![python](https://img.shields.io/badge/python->=3.11-3776AB.svg?logo=python&logoColor=white)](https://python.org)
+[![license](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+![feishu](https://img.shields.io/badge/feishu-WebSocket-00D6B9.svg?logo=feishu&logoColor=white)
+![test](https://img.shields.io/badge/Test%20Suite-passing-brightgreen.svg)
+![docs](https://img.shields.io/badge/docs-nanobot.wiki-blue.svg)
 
-<p align="center">
-  <a href="https://python.org"><img src="https://img.shields.io/badge/python->=3.11-3776AB.svg?logo=python&logoColor=white" alt="python"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="license"></a>
-  <img src="https://img.shields.io/badge/feishu-WebSocket-00D6B9.svg?logo=feishu&logoColor=white" alt="feishu">
-  <img src="https://img.shields.io/badge/Test%20Suite-passing-brightgreen.svg" alt="test">
-  <img src="https://img.shields.io/badge/docs-nanobot.wiki-blue.svg" alt="docs">
-</p>
+[简体中文](#小文-xiaowen) | [English](#english)
 
-<p align="center">
-  <a href="#快速开始">快速开始</a> •
-  <a href="#核心功能">核心功能</a> •
-  <a href="#系统架构">系统架构</a> •
-  <a href="#项目运行">项目运行</a> •
-  <a href="#知识库使用说明">知识库使用说明</a>
-</p>
+<br clear="left" />
 
 ---
 
