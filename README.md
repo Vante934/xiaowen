@@ -1,4 +1,4 @@
-<img src="images/飞书小文.png" align="left" width="115" alt="Xiaowen Logo" />
+<img src="images/飞书小文.png" align="left" width="95" alt="Xiaowen Logo" />
 
 # 小文 (Xiaowen)
 
