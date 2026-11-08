@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Xiaowen Logo" width="180"/>
+  <img src="images/飞书小文.png" alt="Xiaowen Logo" width="180"/>
 </p>
 
 <h1 align="center">小文 (Xiaowen)</h1>
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="#小文xiaowen">简体中文</a> | <a href="#english">English</a>
+  <a href="#小文-xiaowen">简体中文</a> | <a href="#english">English</a>
 </p>
 
 <p align="center">
